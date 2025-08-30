@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>💬 Firebase Chat App</title>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Login/Register Page -->
+<div id="login-page" class="login-box">
+  <h2>Login or Register</h2>
+  <input id="email" type="email" placeholder="Email" required>
+  <input id="password" type="password" placeholder="Password" required>
+  <input id="room" type="text" placeholder="Room name (e.g. general)" required>
+  <input id="profilePic" type="file" accept="image/*">
+  <button id="loginBtn">Login</button>
+  <button id="registerBtn">Register</button>
+  <p id="login-error" style="color:red"></p>
+</div>
+
+<!-- Chat Page -->
+<div id="chat-page" class="chat-container hidden">
+  <h2 id="room-name"></h2>
+  <div id="users">Online Users: <span id="online-users"></span></div>
+  <ul id="messages"></ul>
+  <div id="chat-box">
+    <input id="message" autocomplete="off" placeholder="Type a message..." />
+    <button id="sendBtn">Send</button>
+    <button id="logoutBtn">Logout</button>
+  </div>
+</div>
+
+<script>
+  // Firebase config
+  const firebaseConfig = {
+  apiKey: "AIzaSyD7oa5Zzh4rRge9P9ZNow4HkEf4T2XiQdA",
+  authDomain: "mini-chat-5c168.firebaseapp.com",
+  databaseURL: "https://mini-chat-5c168-default-rtdb.firebaseio.com",
+  projectId: "mini-chat-5c168",
+  storageBucket: "mini-chat-5c168.firebasestorage.app",
+  messagingSenderId: "358845668659",
+  appId: "1:358845668659:web:d9f6233df98cd251b77246"
+  };
+  const app = firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.database();
+  const storage = firebase.storage();
+
+  // Elements
+  const loginPage = document.getElementById("login-page");
+  const chatPage = document.getElementById("chat-page");
+  const emailInput = document.getElementById("email");
+  const passwordInput = document.getElementById("password");
+  const roomInput = document.getElementById("room");
+  const profileInput = document.getElementById("profilePic");
+  const loginBtn = document.getElementById("loginBtn");
+  const registerBtn = document.getElementById("registerBtn");
+  const loginError = document.getElementById("login-error");
+  const roomNameEl = document.getElementById("room-name");
+  const messagesEl = document.getElementById("messages");
+  const messageInput = document.getElementById("message");
+  const sendBtn = document.getElementById("sendBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
+  const onlineUsersEl = document.getElementById("online-users");
+
+  let currentUser = null;
+  let room = "";
+  let profilePicUrl = "";
+
+  // Register
+  registerBtn.onclick = async () => {
+    const email = emailInput.value;
+    const password = passwordInput.value;
+    const roomName = roomInput.value.trim();
+    const file = profileInput.files[0];
+
+    if(!email || !password || !roomName) return;
+
+    try {
+      const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+      currentUser = userCredential.user;
+      room = roomName;
+
+      if(file){
+        const storageRef = storage.ref(`profilePics/${currentUser.uid}`);
+        await storageRef.put(file);
+        profilePicUrl = await storageRef.getDownloadURL();
+      }
+
+      db.ref(`users/${currentUser.uid}`).set({
+        email: email,
+        profilePic: profilePicUrl || ""
+      });
+
+      loginPage.classList.add("hidden");
+      chatPage.classList.remove("hidden");
+      initChat();
+    } catch(err){
+      loginError.textContent = err.message;
+    }
+  };
+
+  // Login
+  loginBtn.onclick = async () => {
+    const email = emailInput.value;
+    const password = passwordInput.value;
+    const roomName = roomInput.value.trim();
+    if(!email || !password || !roomName) return;
+
+    try {
+      const userCredential = await auth.signInWithEmailAndPassword(email, password);
+      currentUser = userCredential.user;
+      room = roomName;
+
+      const userData = await db.ref(`users/${currentUser.uid}`).once("value");
+      profilePicUrl = userData.val()?.profilePic || "";
+
+      loginPage.classList.add("hidden");
+      chatPage.classList.remove("hidden");
+      initChat();
+    } catch(err){
+      loginError.textContent = err.message;
+    }
+  };
+
+  logoutBtn.onclick = () => auth.signOut().then(()=> location.reload());
+
+  function initChat(){
+    roomNameEl.textContent = "Room: " + room;
+
+    // Online users
+    const userRef = db.ref(`rooms/${room}/online/${currentUser.uid}`);
+    userRef.set({ email: currentUser.email, profilePic: profilePicUrl });
+    userRef.onDisconnect().remove();
+
+    db.ref(`rooms/${room}/online`).on("value", snapshot=>{
+      const users = snapshot.val() ? Object.values(snapshot.val()) : [];
+      onlineUsersEl.innerHTML = users.map(u=> u.profilePic ? `<img src="${u.profilePic}" width="20" style="border-radius:50%;margin-right:3px;">` : "") + users.map(u=>u.email).join(", ");
+    });
+
+    // Messages
+    db.ref(`rooms/${room}/messages`).on("child_added", snapshot=>{
+      const msg = snapshot.val();
+      addMessage(msg, msg.userId === currentUser.uid);
+    });
+
+    sendBtn.onclick = () => {
+      const text = messageInput.value.trim();
+      if(!text) return;
+
+      const msg = {
+        userId: currentUser.uid,
+        userName: currentUser.email,
+        profilePic: profilePicUrl,
+        text,
+        timestamp: Date.now()
+      };
+      db.ref(`rooms/${room}/messages`).push(msg);
+      messageInput.value = "";
+    };
+  }
+
+  function addMessage(msg, isMe){
+    const li = document.createElement("li");
+    li.className = isMe ? "me" : "other";
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+
+    let avatarHTML = "";
+    if(!isMe && msg.profilePic) avatarHTML = `<img class="avatar" src="${msg.profilePic}">`;
+
+    bubble.innerHTML = `${avatarHTML}<span>${msg.text}</span><span class="timestamp">${new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>`;
+    li.appendChild(bubble);
+    messagesEl.appendChild(li);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+</script>
+</body>
+</html>
