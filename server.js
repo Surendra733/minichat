@@ -5,15 +5,22 @@ const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
+
+// Socket.IO setup with CORS
 const io = socketIo(server, {
   cors: {
-    origin: "*", // production me specific domain dalna
+    origin: "*", // For production, replace "*" with your domain
     methods: ["GET", "POST"]
   }
 });
 
 // Serve static files from /public
 app.use(express.static(path.join(__dirname, "public")));
+
+// Default route for Render
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 
 // Store connected users
 let users = {};
@@ -31,7 +38,7 @@ io.on("connection", (socket) => {
     // Notify the user
     socket.emit("message", { user: "System", text: `Welcome ${username} to ${room}` });
 
-    // Notify others
+    // Notify others in the room
     socket.broadcast.to(room).emit("message", { user: "System", text: `${username} joined the chat` });
   });
 
