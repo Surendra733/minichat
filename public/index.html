@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>💬 Firebase Chat App</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@joeattardi/emoji-button@4.6.2/dist/index.min.js"></script>
+
+
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -13,13 +17,27 @@
 </head>
 <body>
 
+
+
 <!-- Login/Register Page -->
 <div id="login-page" class="login-box">
   <h2>Login or Register</h2>
+  <input id="name" type="text" placeholder="Your Name" required>
   <input id="email" type="email" placeholder="Email" required>
   <input id="password" type="password" placeholder="Password" required>
   <input id="room" type="text" placeholder="Room name (e.g. general)" required>
-  <input id="profilePic" type="file" accept="image/*">
+  
+<label>Choose Profile Pic:</label>
+<div id="avatar-options">
+  <img src="https://cdn-icons-png.flaticon.com/512/194/194938.png" class="avatar-choice" width="40">
+  <img src="https://cdn-icons-png.flaticon.com/512/2922/2922510.png" class="avatar-choice" width="40">
+  <img src="https://cdn-icons-png.flaticon.com/512/2922/2922656.png" class="avatar-choice" width="40">
+  <img src="https://cdn-icons-png.flaticon.com/512/2922/2922688.png" class="avatar-choice" width="40">
+</div>
+
+<!-- Still allow custom upload if user wants -->
+<input id="profilePic" type="file" accept="image/*">
+
   <button id="loginBtn">Login</button>
   <button id="registerBtn">Register</button>
   <p id="login-error" style="color:red"></p>
@@ -27,14 +45,39 @@
 
 <!-- Chat Page -->
 <div id="chat-page" class="chat-container hidden">
-  <h2 id="room-name"></h2>
+  <!-- WhatsApp-style Header -->
+<div id="chat-header">
+  <img id="roomAvatar" src="https://cdn-icons-png.flaticon.com/512/1077/1077012.png" alt="Room Avatar">
+
+  <span id="room-name"></span>
+</div>
+
   <div id="users">Online Users: <span id="online-users"></span></div>
+
+
+<!-- Search bar above messages -->
+<input id="search-bar" type="text" placeholder="Search messages..." />
+
+<!-- Messages list -->
+<ul id="messages"></ul>
+
+<!-- Typing indicator -->
+<div id="typing-indicator"></div>
+
+<!-- Scroll to bottom button -->
+<button id="scroll-bottom-btn" title="Scroll to latest message">⬇️</button>
+
+
+
+
   <ul id="messages"></ul>
   <div id="chat-box">
-    <input id="message" autocomplete="off" placeholder="Type a message..." />
-    <button id="sendBtn">Send</button>
-    <button id="logoutBtn">Logout</button>
-  </div>
+  <input id="message" autocomplete="off" placeholder="Type a message..." />
+  <button id="emojiBtn">😊</button>
+  <button id="sendBtn">Send</button>
+  <button id="logoutBtn">Logout</button>
+</div>
+
 </div>
 
 <script>
@@ -56,6 +99,7 @@
   // Elements
   const loginPage = document.getElementById("login-page");
   const chatPage = document.getElementById("chat-page");
+  const nameInput = document.getElementById("name");
   const emailInput = document.getElementById("email");
   const passwordInput = document.getElementById("password");
   const roomInput = document.getElementById("room");
@@ -74,14 +118,37 @@
   let room = "";
   let profilePicUrl = "";
 
+
+ // Request notification permission
+  if ("Notification" in window && Notification.permission !== "granted") {
+      Notification.requestPermission();
+  }
+
+
+let selectedAvatar = "";
+
+document.querySelectorAll(".avatar-choice").forEach(img => {
+  img.addEventListener("click", () => {
+    selectedAvatar = img.src;
+
+    // highlight selected
+    document.querySelectorAll(".avatar-choice").forEach(i => i.style.border = "none");
+    img.style.border = "2px solid green";
+  });
+});
+
+
+
+
   // Register
   registerBtn.onclick = async () => {
+    const name = nameInput.value.trim();
     const email = emailInput.value;
     const password = passwordInput.value;
     const roomName = roomInput.value.trim();
     const file = profileInput.files[0];
 
-    if(!email || !password || !roomName) return;
+    if(!name ||!email || !password || !roomName) return;
 
     try {
       const userCredential = await auth.createUserWithEmailAndPassword(email, password);
@@ -121,6 +188,7 @@
 
       const userData = await db.ref(`users/${currentUser.uid}`).once("value");
       profilePicUrl = userData.val()?.profilePic || "";
+      currentUser.name = userData.val()?.name || currentUser.email;
 
       loginPage.classList.add("hidden");
       chatPage.classList.remove("hidden");
@@ -129,6 +197,8 @@
       loginError.textContent = err.message;
     }
   };
+
+  
 
   logoutBtn.onclick = () => auth.signOut().then(()=> location.reload());
 
@@ -149,6 +219,20 @@
     db.ref(`rooms/${room}/messages`).on("child_added", snapshot=>{
       const msg = snapshot.val();
       addMessage(msg, msg.userId === currentUser.uid);
+
+
+
+       // Notifications for messages from others
+      if (msg.userId !== currentUser.uid && Notification.permission === "granted") {
+        new Notification(`New message from ${msg.userName}`, {
+          body: msg.text,
+          icon: msg.profilePic || "https://via.placeholder.com/40"
+        });
+
+        // Optional: play notification sound
+        const audio = new Audio('./notify.mp3'); // Add notif.mp3 in your project
+        audio.play();
+      }
     });
 
     sendBtn.onclick = () => {
@@ -177,11 +261,171 @@
     let avatarHTML = "";
     if(!isMe && msg.profilePic) avatarHTML = `<img class="avatar" src="${msg.profilePic}">`;
 
-    bubble.innerHTML = `${avatarHTML}<span>${msg.text}</span><span class="timestamp">${new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>`;
+    bubble.innerHTML = `
+  ${avatarHTML}
+  <div class="msg-content">
+    <strong class="username">${msg.userName}</strong><br>
+    <span>${msg.text}</span>
+    <span class="timestamp">
+      ${new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+    </span>
+  </div>
+`;
+
     li.appendChild(bubble);
     messagesEl.appendChild(li);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
+
+
+  const picker = new EmojiButton({ position: 'top-start' });
+const emojiBtn = document.getElementById('emojiBtn');
+
+emojiBtn.addEventListener('click', () => picker.togglePicker(emojiBtn));
+picker.on('emoji', selection => messageInput.value += selection.emoji);
+
+</script>
+
+<script>
+// Elements for new features
+const typingIndicator = document.getElementById("typing-indicator");
+const searchBar = document.getElementById("search-bar");
+const scrollBottomBtn = document.getElementById("scroll-bottom-btn");
+
+let typingTimeout;
+let isTyping = false;
+
+// Typing indicator logic
+messageInput.addEventListener("input", () => {
+  if (!isTyping) {
+    isTyping = true;
+    db.ref(`rooms/${room}/typing/${currentUser .uid}`).set(currentUser .email);
+  }
+  clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(() => {
+    isTyping = false;
+    db.ref(`rooms/${room}/typing/${currentUser .uid}`).remove();
+  }, 1500);
+});
+
+// Listen for typing users
+db.ref(`rooms/${room}/typing`).on("value", snapshot => {
+  const typingUsers = snapshot.val() ? Object.values(snapshot.val()) : [];
+  const othersTyping = typingUsers.filter(email => email !== currentUser .email);
+  if (othersTyping.length > 0) {
+    typingIndicator.textContent = `${othersTyping.join(", ")} is typing...`;
+  } else {
+    typingIndicator.textContent = "";
+  }
+});
+
+// Scroll to bottom button logic
+messagesEl.addEventListener("scroll", () => {
+  const nearBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 50;
+  scrollBottomBtn.style.display = nearBottom ? "none" : "flex";
+});
+
+scrollBottomBtn.addEventListener("click", () => {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  scrollBottomBtn.style.display = "none";
+});
+
+// Search messages logic
+searchBar.addEventListener("input", () => {
+  const query = searchBar.value.toLowerCase();
+  const messageItems = messagesEl.querySelectorAll("li");
+  messageItems.forEach(li => {
+    const textSpan = li.querySelector(".msg-content span");
+    if (textSpan) {
+      const text = textSpan.textContent.toLowerCase();
+      if (query && text.includes(query)) {
+        li.classList.add("highlight");
+      } else {
+        li.classList.remove("highlight");
+      }
+    }
+  });
+});
+
+// Modify addMessage to include message reactions and status
+function addMessage(msg, isMe, messageId = null, status = "sent") {
+  const li = document.createElement("li");
+  if (msg.system) {
+    li.className = "system-message";
+    li.textContent = msg.text;
+    messagesEl.appendChild(li);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return;
+  }
+  li.className = isMe ? "me" : "other";
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+
+  let avatarHTML = "";
+  if (!isMe && msg.profilePic) avatarHTML = `<img class="avatar" src="${msg.profilePic}">`;
+
+  bubble.innerHTML = `
+    ${avatarHTML}
+    <div class="msg-content">
+      <strong class="username">${msg.userName}</strong><br>
+      <span>${msg.text}</span>
+      <span class="timestamp">
+        ${new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </span>
+      <span class="message-status">${status}</span>
+      <div class="message-reactions" data-msgid="${messageId || ''}">
+        <span title="Like">👍</span>
+        <span title="Love">❤️</span>
+        <span title="Laugh">😂</span>
+        <span title="Surprised">😮</span>
+        <span title="Sad">😢</span>
+      </div>
+    </div>
+  `;
+
+  li.appendChild(bubble);
+  messagesEl.appendChild(li);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  // Reaction click handler
+  const reactionsDiv = bubble.querySelector(".message-reactions");
+  reactionsDiv.querySelectorAll("span").forEach(emojiSpan => {
+    emojiSpan.addEventListener("click", () => {
+      alert(`You reacted with ${emojiSpan.textContent} to message: "${msg.text}"`);
+      // Here you can add logic to save reactions to Firebase if desired
+    });
+  });
+}
+
+// Override your existing message listener to pass messageId and status
+db.ref(`rooms/${room}/messages`).on("child_added", snapshot => {
+  const msg = snapshot.val();
+  const messageId = snapshot.key;
+  addMessage(msg, msg.userId === currentUser .uid, messageId, "sent");
+
+  // Notifications for messages from others
+  if (msg.userId !== currentUser .uid && Notification.permission === "granted") {
+    new Notification(`New message from ${msg.userName}`, {
+      body: msg.text,
+      icon: msg.profilePic || "https://via.placeholder.com/40"
+    });
+
+    // Optional: play notification sound
+    const audio = new Audio('./notify.mp3'); // Add notify.mp3 in your project
+    audio.play();
+  }
+});
+
+// Example: Add system message when user joins
+function addSystemMessage(text) {
+  addMessage({ text, system: true }, false);
+}
+
+// Call this when user joins room
+addSystemMessage(`${currentUser .email} joined the room`);
+
+
 </script>
 </body>
 </html>
