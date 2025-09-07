@@ -195,7 +195,7 @@ ul::-webkit-scrollbar-thumb {
 @media screen and (max-width: 600px) {
     .chat-container {
         width: 95%;
-        margin: 20px auto;
+        margin: 5px auto;
         height: 88vh;
     }
 
